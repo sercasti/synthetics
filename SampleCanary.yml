@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Metadata: 
+  License: Apache-2.0
+Description: 'AWS CloudFormation Sample to deploy a basic Amazon CloudWatch Synthetics Configuration'
+Parameters: 
+  CanaryNameParameter: 
+    Type: String
+    Description: Identification Name for the Canary (can include letters (a-z), numbers (0-9), and dashes (-).)
+    AllowedPattern: ^[0-9a-z_\-]+$
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      Tags:
+        - 
+          Key: "Environment"
+          Value: "SandBox"
+      BucketEncryption: 
+        ServerSideEncryptionConfiguration: 
+        - ServerSideEncryptionByDefault: 
+            SSEAlgorithm: AES256
+  SyntheticsRole: 
+    Type: "AWS::IAM::Role"
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Principal: 
+              Service: 
+                - "lambda.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Path: "/service-role/"
+  SyntheticsRolePolicy: 
+    Type: "AWS::IAM::Policy"
+    Properties: 
+      PolicyName: "root"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Action: 
+            - s3:PutObject
+            - s3:GetBucketLocation
+            Resource: !Join 
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref S3Bucket
+                - /canary/*
+          - 
+            Effect: "Allow"
+            Action: 
+            - s3:ListAllMyBuckets
+            Resource: "*"             
+          -
+            Effect: "Allow"
+            Action: 
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            - logs:CreateLogGroup
+            Resource: !Join 
+              - ''
+              - - 'arn:aws:logs:'
+                - !Ref 'AWS::Region'
+                - ':'
+                - !Ref 'AWS::AccountId'
+                - ':log-group:/aws/lambda/cwsyn/*'    
+          - 
+            Effect: "Allow"
+            Action: 
+            - cloudwatch:PutMetricData
+            Resource: "*"       
+            Condition:
+              StringEquals:
+                'cloudwatch:namespace': 'CloudWatchSynthetics'
+      Roles: 
+        - 
+          Ref: "SyntheticsRole"      
+  SyntheticsCanary:
+    Type: 'AWS::Synthetics::Canary'
+    Properties:
+      Name: !Ref CanaryNameParameter
+      ExecutionRoleArn: !GetAtt SyntheticsRole.Arn
+      Code: {Handler: pageLoadBlueprint.handler, Script: "var synthetics = require('Synthetics');\nconst log = require('SyntheticsLogger');\nconst pageLoadBlueprint = async function () {\n// INSERT URL here\nconst URL = \"https://aws.amazon.com/\";\n\nlet page = await synthetics.getPage();\nconst response = await page.goto(URL, {waitUntil: 'domcontentloaded', timeout: 30000});\n//Wait for page to render.\n//Increase or decrease wait time based on endpoint being monitored.\nawait page.waitFor(15000);\nawait synthetics.takeScreenshot('loaded', 'loaded');\nlet pageTitle = await page.title();\nlog.info('Page title: ' + pageTitle);\nif (response.status() !== 200) {\n     throw \"Failed to load page!\";\n}\n};\n\nexports.handler = async () => {\nreturn await pageLoadBlueprint();\n};\n"}
+      ArtifactS3Location: !Join 
+        - ''
+        - - 's3://'
+          - !Ref S3Bucket
+          - '/canary/'
+          - !Ref CanaryNameParameter
+          - '/'
+      RuntimeVersion: syn-1.0
+      Schedule: {Expression: 'rate(1 minute)', DurationInSeconds: 3600}
+      RunConfig: {TimeoutInSeconds: 60}
+      FailureRetentionPeriod: 30
+      SuccessRetentionPeriod: 30
+      Tags: [{Key: Environment, Value: SandBox}]
+      StartCanaryAfterCreation: true          
