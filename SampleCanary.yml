@@ -92,7 +92,7 @@ Resources:
           - '/canary/'
           - !Ref CanaryNameParameter
           - '/'
-      RuntimeVersion: syn-1.0
+      RuntimeVersion: syn-nodejs-puppeteer-3.3
       Schedule: {Expression: 'rate(1 minute)', DurationInSeconds: 3600}
       RunConfig: {TimeoutInSeconds: 60}
       FailureRetentionPeriod: 30
